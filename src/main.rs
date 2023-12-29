@@ -88,6 +88,7 @@ mod tests {
     use super::*;
 
     use reqwest::header::CONTENT_TYPE;
+    use reqwest::multipart::{Form, Part};
     use reqwest::RequestBuilder;
     use std::net::{SocketAddr, TcpListener as StdTcpListener};
 
@@ -201,6 +202,108 @@ host: {addr}
 content-length: 38
 
 {{\"productId\": 123456, \"quantity\": 100}}"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn post_formdata_text() {
+        let client = TestClient::new();
+        let addr = client.addr();
+
+        const THUMB: &'static [u8] = include_bytes!("../demo.txt");
+        let form = Form::new()
+            .text("title", "Cool story")
+            .text("year", "2023")
+            .part(
+                "thumb",
+                Part::bytes(THUMB)
+                    .file_name("demo.txt")
+                    .mime_str("text/plain")
+                    .unwrap()
+            );
+        let boundary = form.boundary().to_owned();
+
+        let req = client.post("/form-data/text").multipart(form);
+
+        let resp = TestClient::send(req).await;
+        assert_eq!(
+            resp,
+            format!("POST /form-data/text
+content-type: multipart/form-data; boundary={boundary}
+content-length: 513
+accept: */*
+host: {addr}
+
+--{boundary}\r
+Content-Disposition: form-data; name=\"title\"\r
+\r
+Cool story\r
+--{boundary}\r
+Content-Disposition: form-data; name=\"year\"\r
+\r
+2023\r
+--{boundary}\r
+Content-Disposition: form-data; name=\"thumb\"; filename=\"demo.txt\"\r
+Content-Type: text/plain\r
+\r
+hi there
+
+a file
+\r
+--{boundary}--\r
+"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn post_formdata_file() {
+        let client = TestClient::new();
+        let addr = client.addr();
+
+        const THUMB: &'static [u8] = include_bytes!("../demo.png");
+        let form = Form::new()
+            .text("title", "Cool story")
+            .text("year", "2023")
+            .part(
+                "thumb",
+                Part::bytes(THUMB)
+                    .file_name("demo.png")
+                    .mime_str("image/png")
+                    .unwrap()
+            );
+        let boundary = form.boundary().to_owned();
+
+        let req = client.post("/form-data/image").multipart(form);
+
+        let resp = TestClient::send(req).await;
+        assert_eq!(
+            resp,
+            format!("POST /form-data/image
+content-type: multipart/form-data; boundary={boundary}
+content-length: 791
+accept: */*
+host: {addr}
+
+--{boundary}\r
+Content-Disposition: form-data; name=\"title\"\r
+\r
+Cool story\r
+--{boundary}\r
+Content-Disposition: form-data; name=\"year\"\r
+\r
+2023\r
+--{boundary}\r
+Content-Disposition: form-data; name=\"thumb\"; filename=\"demo.png\"\r
+Content-Type: image/png\r
+\r
+.PNG\r
+.
+...\rIHDR.....................sRGB.........gAMA......a....\tpHYs...t...t..f.x....IDAT(S..A..p.....3(.'.V.RZ....J.a8)....Vn.b..\\......P.?...O==..^...,3.....;........R..=.S....Mr...2.K...X(.l.D..a...v......q.Nk...xWf.^n
+:.7..#J.0.....(.l.d5...1.........I`..t.X.g..k..-.......!..r.....IEND.B`.\r
+--{boundary}--\r
+"
             )
         );
     }
