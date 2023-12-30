@@ -3,6 +3,7 @@
 cargo add tokio --features macros,rt-multi-thread
 cargo add axum
 cargo add --dev reqwest -F multipart
+cargo add --dev http tower fastrand
 
 curl -X POST http://localhost:3000/hello/name \
     -b tower.sid=abcd1234 -d "param1=value1&param2=value2"
@@ -87,10 +88,21 @@ fn printable_bytes(v: Bytes) -> String {
 mod tests {
     use super::*;
 
+    use std::net::{SocketAddr, TcpListener as StdTcpListener};
+
     use reqwest::header::CONTENT_TYPE;
     use reqwest::multipart::{Form, Part};
     use reqwest::RequestBuilder;
-    use std::net::{SocketAddr, TcpListener as StdTcpListener};
+
+    use tower::ServiceExt; // oneshot
+
+    use axum::body::{to_bytes, Body};
+
+    mod multipart;
+    use multipart::{MultipartFieldValue, MultipartFields};
+
+    const DEMO_IMG: &'static [u8] = include_bytes!("../demo.png");
+    const DEMO_TXT: &'static [u8] = include_bytes!("../demo.txt");
 
     struct TestClient {
         addr: SocketAddr,
@@ -150,8 +162,9 @@ mod tests {
     async fn get() {
         let client = TestClient::new();
         let addr = client.addr();
-        let resp = client.get("/home").await;
-        assert_eq!(resp, format!("GET /home\naccept: */*\nhost: {addr}\n\n"));
+        let path = "/home";
+        let resp = client.get(path).await;
+        assert_eq!(resp, format!("GET {path}\naccept: */*\nhost: {addr}\n\n"));
     }
 
     #[tokio::test]
@@ -159,8 +172,9 @@ mod tests {
         let client = TestClient::new();
         let addr = client.addr();
 
+        let path = "/hello/name";
         let req = client
-            .post("/hello/name")
+            .post(path)
             .header("cookie", "tower.sid=abcd1234")
             .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
             .body("param1=value1&param2=value2");
@@ -169,7 +183,7 @@ mod tests {
         assert_eq!(
             resp,
             format!(
-                "POST /hello/name
+                "POST {path}
 cookie: tower.sid=abcd1234
 content-type: application/x-www-form-urlencoded
 accept: */*
@@ -186,8 +200,9 @@ param1=value1&param2=value2"
         let client = TestClient::new();
         let addr = client.addr();
 
+        let path = "/echo/post/json";
         let req = client
-            .post("/echo/post/json")
+            .post(path)
             .header(CONTENT_TYPE, "application/json")
             .body("{\"productId\": 123456, \"quantity\": 100}");
 
@@ -195,7 +210,7 @@ param1=value1&param2=value2"
         assert_eq!(
             resp,
             format!(
-                "POST /echo/post/json
+                "POST {path}
 content-type: application/json
 accept: */*
 host: {addr}
@@ -211,25 +226,26 @@ content-length: 38
         let client = TestClient::new();
         let addr = client.addr();
 
-        const THUMB: &'static [u8] = include_bytes!("../demo.txt");
         let form = Form::new()
             .text("title", "Cool story")
             .text("year", "2023")
             .part(
                 "thumb",
-                Part::bytes(THUMB)
+                Part::bytes(DEMO_TXT)
                     .file_name("demo.txt")
                     .mime_str("text/plain")
-                    .unwrap()
+                    .unwrap(),
             );
         let boundary = form.boundary().to_owned();
 
-        let req = client.post("/form-data/text").multipart(form);
+        let path = "/form-data/text";
+        let req = client.post(path).multipart(form);
 
         let resp = TestClient::send(req).await;
         assert_eq!(
             resp,
-            format!("POST /form-data/text
+            format!(
+                "POST {path}
 content-type: multipart/form-data; boundary={boundary}
 content-length: 513
 accept: */*
@@ -262,25 +278,104 @@ a file
         let client = TestClient::new();
         let addr = client.addr();
 
-        const THUMB: &'static [u8] = include_bytes!("../demo.png");
         let form = Form::new()
             .text("title", "Cool story")
             .text("year", "2023")
             .part(
                 "thumb",
-                Part::bytes(THUMB)
+                Part::bytes(DEMO_IMG)
                     .file_name("demo.png")
                     .mime_str("image/png")
-                    .unwrap()
+                    .unwrap(),
             );
         let boundary = form.boundary().to_owned();
 
-        let req = client.post("/form-data/image").multipart(form);
+        let path = "/form-data/image";
+        let req = client.post(path).multipart(form);
 
         let resp = TestClient::send(req).await;
         assert_eq!(
             resp,
-            format!("POST /form-data/image
+            format!(
+                "POST {path}
+content-type: multipart/form-data; boundary={boundary}
+content-length: 791
+accept: */*
+host: {addr}
+
+--{boundary}\r
+Content-Disposition: form-data; name=\"title\"\r
+\r
+Cool story\r
+--{boundary}\r
+Content-Disposition: form-data; name=\"year\"\r
+\r
+2023\r
+--{boundary}\r
+Content-Disposition: form-data; name=\"thumb\"; filename=\"demo.png\"\r
+Content-Type: image/png\r
+\r
+.PNG\r
+.
+...\rIHDR.....................sRGB.........gAMA......a....\tpHYs...t...t..f.x....IDAT(S..A..p.....3(.'.V.RZ....J.a8)....Vn.b..\\......P.?...O==..^...,3.....;........R..=.S....Mr...2.K...X(.l.D..a...v......q.Nk...xWf.^n
+:.7..#J.0.....(.l.d5...1.........I`..t.X.g..k..-.......!..r.....IEND.B`.\r
+--{boundary}--\r
+"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn request_conversion() {
+        // reqwest uses a custom random generator:
+        // https://github.com/seanmonstar/reqwest/blob/4f54ba732f80ccb89e50954a369d6e8bb46375f2/src/async_impl/multipart.rs#L515
+        // https://github.com/seanmonstar/reqwest/blob/4f54ba732f80ccb89e50954a369d6e8bb46375f2/src/util.rs#L26
+        let mut rng = fastrand::Rng::new();
+        let boundary = format!(
+            "{:016x}-{:016x}-{:016x}-{:016x}",
+            rng.u64(..),
+            rng.u64(..),
+            rng.u64(..),
+            rng.u64(..)
+        );
+
+        let fields = MultipartFields::new(&[
+            ("title", MultipartFieldValue::Text("Cool story")),
+            ("year", MultipartFieldValue::Text("2023")),
+            (
+                "thumb",
+                MultipartFieldValue::File {
+                    filename: "demo.png",
+                    data: DEMO_IMG,
+                    content_type: "image/png",
+                },
+            ),
+        ]);
+
+        let path = "/form-data/image";
+        let addr = "0.0.0.0:40123";
+        let req_body = fields.to_http(&boundary);
+        let request = http::Request::builder()
+            .method("POST")
+            .uri(path)
+            .header(
+                CONTENT_TYPE.to_string(),
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .header("content-length", req_body.len())
+            .header("accept", "*/*")
+            .header("host", addr)
+            .body(Body::from(req_body))
+            .unwrap();
+
+        let response = router().oneshot(request).await.unwrap();
+        let body_bytes = to_bytes(response.into_body(), 1234).await.unwrap().to_vec();
+        let resp = unsafe { String::from_utf8_unchecked(body_bytes) };
+
+        assert_eq!(
+            resp,
+            format!(
+                "POST {path}
 content-type: multipart/form-data; boundary={boundary}
 content-length: 791
 accept: */*
