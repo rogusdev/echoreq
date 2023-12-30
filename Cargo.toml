@@ -2,6 +2,11 @@
 name = "echoreq"
 version = "1.0.0"
 edition = "2021"
+license = "MIT"
+description = "Simple webserver to echo http requests -- headers, etc, including multipart form-data (binary converted to printable chars). For testing!"
+repository = "https://github.com/rogusdev/echoreq"
+keywords = ["echo", "http", "requests", "json", "multipart"]
+categories = ["HTTP server", "Testing", "Command line utilities"]
 
 exclude = [
     "demo.png",

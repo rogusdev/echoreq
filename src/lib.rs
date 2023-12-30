@@ -22,6 +22,8 @@ async fn echoreq(method: Method, uri: Uri, headers: HeaderMap, body: Bytes) -> S
         Err(_) => printable_bytes(body),
     };
 
+    println!("Received: {method} {uri}");
+
     format!("{method} {uri}\n{headers}\n\n{body}")
 }
 
