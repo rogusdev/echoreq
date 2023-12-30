@@ -11,7 +11,7 @@ use tower::ServiceExt; // oneshot
 use axum::body::{to_bytes, Body};
 
 mod multipart;
-use multipart::{MultipartFieldValue, MultipartFields};
+use multipart::{multipart_request, MultipartFieldValue, MultipartFields};
 
 use echoreq::router;
 
@@ -268,15 +268,8 @@ async fn request_conversion() {
 
     let path = "/form-data/image";
     let addr = "0.0.0.0:40123";
-    let req_body = fields.to_http(&boundary);
-    let request = http::Request::builder()
-        .method("POST")
-        .uri(path)
-        .header(
-            CONTENT_TYPE.to_string(),
-            format!("multipart/form-data; boundary={boundary}"),
-        )
-        .header("content-length", req_body.len())
+    let (builder, req_body) = multipart_request(path, fields, &boundary);
+    let request = builder
         .header("accept", "*/*")
         .header("host", addr)
         .body(Body::from(req_body))

@@ -51,3 +51,21 @@ impl<'a> MultipartFields<'a> {
         b
     }
 }
+
+pub fn multipart_request<'a>(
+    path: &str,
+    fields: MultipartFields<'a>,
+    boundary: &str,
+) -> (axum::http::request::Builder, Vec<u8>) {
+    let body = fields.to_http(boundary);
+    let request = axum::http::Request::builder()
+        .method(axum::http::Method::POST)
+        .uri(path)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .header("content-length", body.len());
+
+    (request, body)
+}

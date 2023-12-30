@@ -11,6 +11,7 @@ categories = ["HTTP server", "Testing", "Command line utilities"]
 exclude = [
     "demo.png",
     "demo.txt",
+    "t",
 ]
 
 [dependencies]
@@ -19,6 +20,5 @@ tokio = { version = "1.35.1", features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]
 fastrand = "2.0.1"
-http = "1.0.0"
 reqwest = { version = "0.11.23", features = ["multipart"] }
 tower = "0.4.13"
